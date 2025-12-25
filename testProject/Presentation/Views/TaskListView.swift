@@ -16,6 +16,7 @@ struct TaskListView: View {
 
     @State private var showAddSheet = false
     @State private var taskForEdit: Task? = nil
+    @State private var taskPendingDelete: Task? = nil
     @AppStorage("todo.searchText") private var searchText: String = ""
     @AppStorage("todo.selectedFilter") private var selectedFilterRaw: String = Filter.all.rawValue
     @AppStorage("todo.sortOption") private var sortOptionRaw: String = SortOption.newest.rawValue
@@ -99,52 +100,16 @@ struct TaskListView: View {
                     } else {
                         List {
                             ForEach(pagedTasks) { task in
-                                HStack(alignment: .top, spacing: 12) {
-                                    Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
-                                        .foregroundStyle(task.isDone ? .green : .secondary)
-                                        .imageScale(.large)
-
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(task.title)
-                                            .font(.headline)
-                                            .strikethrough(task.isDone, color: .secondary)
-
-                                        if let notes = task.notes, !notes.isEmpty {
-                                            Text(notes)
-                                                .font(.subheadline)
-                                                .foregroundStyle(.secondary)
-                                                .lineLimit(2)
-                                        }
-
-                                        Text(task.createdAt, style: .date)
-                                            .font(.caption)
-                                            .foregroundStyle(.tertiary)
-                                    }
-
-                                    Spacer()
-
-                                    HStack(spacing: 8) {
-                                        Button(role: .destructive) {
-                                            viewModel.deleteTask(task, modelContext: modelContext)
-                                        } label: {
-                                            Image(systemName: "trash")
-                                        }
-                                        .tint(.red)
-
-                                        Button {
-                                            viewModel.toggleDone(task)
-                                        } label: {
-                                            Text(task.isDone ? "Belum" : "Selesai")
-                                        }
-                                        .buttonStyle(.bordered)
-                                    }
-                                }
-                                .contentShape(Rectangle())
-                                .onTapGesture { taskForEdit = task }
+                                TaskRow(
+                                    task: task,
+                                    onEdit: { taskForEdit = task },
+                                    onDelete: { taskPendingDelete = task },
+                                    onToggle: { viewModel.toggleDone(task) }
+                                )
                                 .onAppear { loadMoreIfNeeded(currentItem: task) }
                                 .tint(.primary)
                                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                    Button(role: .destructive) { viewModel.deleteTask(task, modelContext: modelContext) } label: {
+                                    Button(role: .destructive) { taskPendingDelete = task } label: {
                                         Label("Hapus", systemImage: "trash")
                                     }
                                     Button { taskForEdit = task } label: {
@@ -225,6 +190,22 @@ struct TaskListView: View {
                     viewModel.updateTask(task, title: title, notes: notes, isDone: isDone)
                 }
             }
+            .alert("Hapus Tugas", isPresented: Binding(
+                get: { taskPendingDelete != nil },
+                set: { if !$0 { taskPendingDelete = nil } }
+            )) {
+                Button("Batal", role: .cancel) { taskPendingDelete = nil }
+                Button("Hapus", role: .destructive) {
+                    if let t = taskPendingDelete {
+                        viewModel.deleteTask(t, modelContext: modelContext)
+                    }
+                    taskPendingDelete = nil
+                }
+            } message: {
+                if let t = taskPendingDelete {
+                    Text("Yakin menghapus \"\(t.title)\"?")
+                }
+            }
         }
     }
 }
@@ -281,3 +262,58 @@ struct TaskListView_Previews: PreviewProvider {
     }
 }
 
+// MARK: - Row view untuk setiap Task
+private struct TaskRow: View {
+    let task: Task
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+    let onToggle: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            // Area kiri: ikon + teks. Dijadikan Button plain agar event tidak bocor.
+            Button(action: onEdit) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(task.isDone ? .green : .secondary)
+                        .imageScale(.large)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(task.title)
+                            .font(.headline)
+                            .strikethrough(task.isDone, color: .secondary)
+
+                        if let notes = task.notes, !notes.isEmpty {
+                            Text(notes)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+
+                        Text(task.createdAt, style: .date)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+
+            // Area kanan: tombol aksi. Tidak memicu onTapGesture area kiri.
+            HStack(spacing: 8) {
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "trash")
+                }
+                .tint(.red)
+
+                Button(action: onToggle) {
+                    Label(task.isDone ? "Belum" : "Selesai", systemImage: task.isDone ? "arrow.uturn.backward" : "checkmark")
+                }
+                .buttonStyle(.bordered)
+                .tint(task.isDone ? .red : .green)
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+}
